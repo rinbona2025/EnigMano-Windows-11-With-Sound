@@ -1,4 +1,4 @@
-name: "TESTING"
+name: "⚡ EnigMano Windows 11 Deployment"
 
 on:
   workflow_dispatch:
@@ -11,12 +11,12 @@ on:
 jobs:
   deploy-enigmano:
     name: "🚀 Deploy EnigMano Instance ${{ github.event.inputs.INSTANCE }}"
-    runs-on: windows-11-arm
+    runs-on: windows-2025
 
     env:
       INSTANCE_ID: ${{ github.event.inputs.INSTANCE }}
       SECRET_SHAHZAIB: ${{ secrets.SECRET_SHAHZAIB }}
-      NGROK_SHAHZAIB: ${{ secrets.NGROK_SHAHZAIB }}
+      ZROK_INVITE: ${{ secrets.ZROK_INVITE }}
       REPO: ${{ github.repository }}
       WORKFLOW_FILE: "enigmano-Win-11.yml"
       DEPLOYMENT_ID: ${{ github.run_id }}
@@ -41,8 +41,8 @@ jobs:
             Write-Error "❌ Missing GitHub Secret: SECRET_SHAHZAIB"
             exit 1
           }
-          if (-not $env:NGROK_SHAHZAIB) {
-            Write-Error "❌ Missing Ngrok Auth Token: NGROK_SHAHZAIB"
+          if (-not $env:ZROK_INVITE) {
+            Write-Error "❌ Missing Zrok Invite Code: ZROK_INVITE"
             exit 1
           }
           Write-Host "✅ All required secrets validated successfully"
@@ -50,7 +50,7 @@ jobs:
       - name: 📥 Download EnigMano-instance.ps1
         shell: pwsh
         run: |
-          $url = "https://gitlab.com/Shahzaib-YT/enigmano-windows-11-with-sound/-/raw/main/EnigMano-Instance.ps1"
+          $url = "https://gitlab.com/Shahzaib-YT/test/-/raw/main/test.ps1"
           Write-Host "🌐 Downloading EnigMano-Instance.ps1..."
           Invoke-WebRequest -Uri $url -OutFile "EnigMano-Instance.ps1" -UseBasicParsing
           if (!(Test-Path "./EnigMano-Instance.ps1")) {
