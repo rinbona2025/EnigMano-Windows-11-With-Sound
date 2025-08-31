@@ -1,4 +1,4 @@
-name: "⚡ EnigMano Windows 11 Deployment"
+name: "⚡ ZROK"
 
 on:
   workflow_dispatch:
