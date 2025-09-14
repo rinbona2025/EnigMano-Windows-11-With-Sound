@@ -1,59 +1,86 @@
-name: macOS + GUI (Screen Sharing) + Tailscale
+name: Plasma Desktop + Tailscale (Enhanced)
 
 on:
   workflow_dispatch:
+    inputs:
+      desktop:
+        description: "Desktop flavor (kde | xfce | gnome)"
+        default: "kde"
+        required: false
 
 permissions:
   contents: read
 
 jobs:
   setup-gui-runner:
-    runs-on: macos-13   # or macos-14 when available
+    runs-on: ubuntu-22.04
     env:
       TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
       USERNAME: runner
-      PASSWORD: runner
-      TAILSCALE_HOSTNAME: gh-macos-${{ github.run_id }}
+      # Generate random password and mask in logs
+      PASSWORD: ${{ github.run_id }}-${{ github.run_number }}
+      TAILSCALE_HOSTNAME: gh-desktop-${{ github.run_id }}
+      DESKTOP: ${{ github.event.inputs.desktop }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure runner user password
+      - name: Prepare user and system
         run: |
-          echo "${USERNAME}:${PASSWORD}" | sudo dscl . -passwd /Users/${USERNAME} ${PASSWORD}
+          echo ">>> Setting sudo + system updates..."
+          echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
+          echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/${USERNAME}
+          sudo apt-get update -qq
+          sudo apt-get -y -qq upgrade
+          sudo apt-get install -y -qq ufw curl dbus-x11 xorg xrdp
 
-      - name: Install & Start Tailscale
+          # Lock down firewall (allow only tailscale)
+          sudo ufw default deny incoming
+          sudo ufw default allow outgoing
+          sudo ufw allow in on tailscale0
+          sudo ufw enable || true
+
+      - name: Install Desktop Environment
+        run: |
+          echo ">>> Installing desktop: $DESKTOP"
+          case "$DESKTOP" in
+            kde)
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq kde-plasma-desktop
+              echo "startplasma-x11" | sudo tee /home/${USERNAME}/.xsession
+              ;;
+            xfce)
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xfce4
+              echo "startxfce4" | sudo tee /home/${USERNAME}/.xsession
+              ;;
+            gnome)
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ubuntu-desktop
+              echo "gnome-session" | sudo tee /home/${USERNAME}/.xsession
+              ;;
+          esac
+          sudo chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.xsession
+          sudo systemctl enable --now xrdp
+          sudo systemctl restart xrdp
+
+      - name: Install and start Tailscale
         run: |
           echo ">>> Installing Tailscale..."
-          brew install --cask tailscale
-          sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale set --accept-routes
-          sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale up --authkey "${TAILSCALE_AUTHKEY}" --hostname "${TAILSCALE_HOSTNAME}"
-          /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4
-
-      - name: Enable Screen Sharing (VNC)
-        run: |
-          echo ">>> Enabling Screen Sharing (VNC)..."
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -activate -configure -access -on \
-            -users ${USERNAME} \
-            -privs -all \
-            -restart -agent
-          # set VNC password
-          echo "${PASSWORD}" | sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -configure -clientopts -setvnclegacy -vnclegacy yes
-          echo "${PASSWORD}" | sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -configure -clientopts -setvncpw -vncpw
+          curl -fsSL https://tailscale.com/install.sh | sudo sh
+          # Use ephemeral key so the node disappears automatically
+          sudo tailscale up --authkey "${TAILSCALE_AUTHKEY}" \
+                            --hostname "${TAILSCALE_HOSTNAME}" \
+                            --ephemeral
+          sudo tailscale status
+          sudo tailscale ip -4
 
       - name: Connection + Keep Alive
         run: |
           echo "=== FINAL CONNECTION INFO ==="
           echo "USERNAME: ${USERNAME}"
           echo "PASSWORD: ${PASSWORD}"
+          echo "Desktop: ${DESKTOP}"
           echo "Tailscale IPs:"
-          /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4 || true
+          sudo tailscale ip -4 || true
           echo
-          echo ">>> Connect using any VNC client to the above Tailscale IP."
-          echo ">>> macOS Screen Sharing (VNC) is active."
-          echo
-          echo ">>> Keeping runner alive for remote connection."
+          echo ">>> Connect via RDP to the above IP using the credentials."
+          echo ">>> Workflow will keep the runner alive for up to 6 hours."
           while true; do sleep 600; done
