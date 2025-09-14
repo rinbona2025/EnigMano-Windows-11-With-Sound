@@ -1,4 +1,4 @@
-name: ubuntu + KDE Plasma + Tailscale
+name: ubuntu + KDE Plasma + Tailscale (Optimized)
 
 on:
   workflow_dispatch:
@@ -8,50 +8,63 @@ permissions:
 
 jobs:
   setup-gui-runner:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     env:
       TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
       USERNAME: runner
-      PASSWORD: runner
+      PASSWORD: runner  # one password for system + KDE session
       TAILSCALE_HOSTNAME: gh-plasma-${{ github.run_id }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure runner user has sudo
+      - name: Prepare user & system
         run: |
+          echo ">>> Updating system and setting password..."
           echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
           echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/${USERNAME}
-
-      - name: Install KDE Plasma + xrdp
-        run: |
-          echo ">>> Installing KDE Plasma Desktop..."
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq kde-plasma-desktop xorg dbus-x11 xrdp
+          sudo apt-get -y -qq upgrade
+          # Lightweight tweaks to avoid heavy animations
+          sudo apt-get install -y -qq ufw curl
 
-          # إعداد جلسة KDE Plasma للمستخدم runner
+      - name: Install lightweight KDE Plasma + xrdp
+        run: |
+          echo ">>> Installing minimal KDE Plasma..."
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            plasma-desktop sddm xorg dbus-x11 xrdp
+
+          # Use SDDM as display manager and set same password for login
+          sudo systemctl enable sddm
           echo "startplasma-x11" | sudo tee /home/${USERNAME}/.xsession
-          echo "exec startplasma-x11" | sudo tee /home/${USERNAME}/.xinitrc
-          sudo chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.xsession /home/${USERNAME}/.xinitrc
-
+          sudo chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.xsession
           sudo systemctl enable --now xrdp
           sudo systemctl restart xrdp
 
-      - name: Install Tailscale
+      - name: Install and start Tailscale
         run: |
           echo ">>> Installing Tailscale..."
-          curl -fsSL https://tailscale.com/install.sh | sudo sh >/dev/null 2>&1
-          sudo tailscale up --authkey "${TAILSCALE_AUTHKEY}" --hostname "${TAILSCALE_HOSTNAME}"
+          curl -fsSL https://tailscale.com/install.sh | sudo sh
+          sudo tailscale up --authkey "${TAILSCALE_AUTHKEY}" \
+                            --hostname "${TAILSCALE_HOSTNAME}" \
+                            --ephemeral
           sudo tailscale ip -4
+
+      - name: Harden network
+        run: |
+          echo ">>> Restricting inbound access to Tailscale only..."
+          sudo ufw default deny incoming
+          sudo ufw default allow outgoing
+          sudo ufw allow in on tailscale0
+          sudo ufw enable || true
 
       - name: Connection + Keep Alive
         run: |
           echo "=== FINAL CONNECTION INFO ==="
           echo "USERNAME: ${USERNAME}"
           echo "PASSWORD: ${PASSWORD}"
-          echo "Tailscale IPs:"
+          echo "Tailscale IPv4:"
           sudo tailscale ip -4 || true
           echo "Connect with any RDP client using the IP above."
-          echo
-          echo ">>> Keeping runner alive. Connect now via RDP."
+          echo "This runner stays alive for up to 6 hours."
           while true; do sleep 600; done
