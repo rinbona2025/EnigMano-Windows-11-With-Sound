@@ -1,4 +1,4 @@
-name: ubuntu + KDE Plasma + Tailscale (Optimized)
+name: ubuntu + KDE Plasma + Tailscale (Enhanced Stable)
 
 on:
   workflow_dispatch:
@@ -12,47 +12,48 @@ jobs:
     env:
       TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
       USERNAME: runner
-      PASSWORD: runner  # one password for system + KDE session
+      PASSWORD: runner   # same password for system + KDE session
       TAILSCALE_HOSTNAME: gh-plasma-${{ github.run_id }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare user & system
+      - name: Ensure runner user has sudo
         run: |
-          echo ">>> Updating system and setting password..."
+          echo ">>> Setting up sudo privileges..."
           echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
           echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/${USERNAME}
           sudo apt-get update -qq
           sudo apt-get -y -qq upgrade
-          # Lightweight tweaks to avoid heavy animations
-          sudo apt-get install -y -qq ufw curl
 
-      - name: Install lightweight KDE Plasma + xrdp
+      - name: Install KDE Plasma + xrdp
         run: |
-          echo ">>> Installing minimal KDE Plasma..."
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            plasma-desktop sddm xorg dbus-x11 xrdp
+          echo ">>> Installing KDE Plasma Desktop..."
+          # plasma-desktop = lighter than full kde-plasma-desktop
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq plasma-desktop xorg dbus-x11 xrdp sddm
 
-          # Use SDDM as display manager and set same password for login
-          sudo systemctl enable sddm
+          # Ensure KDE session starts with same password
           echo "startplasma-x11" | sudo tee /home/${USERNAME}/.xsession
           sudo chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.xsession
+
+          sudo systemctl enable sddm
           sudo systemctl enable --now xrdp
           sudo systemctl restart xrdp
 
-      - name: Install and start Tailscale
+      - name: Install Tailscale
         run: |
           echo ">>> Installing Tailscale..."
           curl -fsSL https://tailscale.com/install.sh | sudo sh
+          # no --ephemeral (unsupported in 1.88.1), only stable flags
           sudo tailscale up --authkey "${TAILSCALE_AUTHKEY}" \
-                            --hostname "${TAILSCALE_HOSTNAME}" \
-                            --ephemeral
+                            --hostname "${TAILSCALE_HOSTNAME}"
+          sudo tailscale status
           sudo tailscale ip -4
 
       - name: Harden network
         run: |
           echo ">>> Restricting inbound access to Tailscale only..."
+          sudo apt-get install -y -qq ufw
           sudo ufw default deny incoming
           sudo ufw default allow outgoing
           sudo ufw allow in on tailscale0
@@ -65,6 +66,7 @@ jobs:
           echo "PASSWORD: ${PASSWORD}"
           echo "Tailscale IPv4:"
           sudo tailscale ip -4 || true
+          echo
           echo "Connect with any RDP client using the IP above."
-          echo "This runner stays alive for up to 6 hours."
+          echo "Runner will remain alive for up to 6 hours."
           while true; do sleep 600; done
