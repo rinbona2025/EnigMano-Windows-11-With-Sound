@@ -1,0 +1,59 @@
+name: macOS + GUI (Screen Sharing) + Tailscale
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  setup-gui-runner:
+    runs-on: macos-13   # or macos-14 when available
+    env:
+      TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+      USERNAME: runner
+      PASSWORD: runner
+      TAILSCALE_HOSTNAME: gh-macos-${{ github.run_id }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure runner user password
+        run: |
+          echo "${USERNAME}:${PASSWORD}" | sudo dscl . -passwd /Users/${USERNAME} ${PASSWORD}
+
+      - name: Install & Start Tailscale
+        run: |
+          echo ">>> Installing Tailscale..."
+          brew install --cask tailscale
+          sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale set --accept-routes
+          sudo /Applications/Tailscale.app/Contents/MacOS/Tailscale up --authkey "${TAILSCALE_AUTHKEY}" --hostname "${TAILSCALE_HOSTNAME}"
+          /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4
+
+      - name: Enable Screen Sharing (VNC)
+        run: |
+          echo ">>> Enabling Screen Sharing (VNC)..."
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on \
+            -users ${USERNAME} \
+            -privs -all \
+            -restart -agent
+          # set VNC password
+          echo "${PASSWORD}" | sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -clientopts -setvnclegacy -vnclegacy yes
+          echo "${PASSWORD}" | sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -clientopts -setvncpw -vncpw
+
+      - name: Connection + Keep Alive
+        run: |
+          echo "=== FINAL CONNECTION INFO ==="
+          echo "USERNAME: ${USERNAME}"
+          echo "PASSWORD: ${PASSWORD}"
+          echo "Tailscale IPs:"
+          /Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4 || true
+          echo
+          echo ">>> Connect using any VNC client to the above Tailscale IP."
+          echo ">>> macOS Screen Sharing (VNC) is active."
+          echo
+          echo ">>> Keeping runner alive for remote connection."
+          while true; do sleep 600; done
