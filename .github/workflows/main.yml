@@ -1,75 +1,47 @@
-name: Plasma Desktop + Tailscale (Enhanced)
+name: ubuntu + KDE Plasma + Tailscale
 
 on:
   workflow_dispatch:
-    inputs:
-      desktop:
-        description: "Desktop flavor (kde | xfce | gnome)"
-        default: "kde"
-        required: false
 
 permissions:
   contents: read
 
 jobs:
   setup-gui-runner:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     env:
       TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
       USERNAME: runner
-      # Generate random password and mask in logs
-      PASSWORD: ${{ github.run_id }}-${{ github.run_number }}
-      TAILSCALE_HOSTNAME: gh-desktop-${{ github.run_id }}
-      DESKTOP: ${{ github.event.inputs.desktop }}
+      PASSWORD: runner
+      TAILSCALE_HOSTNAME: gh-plasma-${{ github.run_id }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare user and system
+      - name: Ensure runner user has sudo
         run: |
-          echo ">>> Setting sudo + system updates..."
           echo "${USERNAME}:${PASSWORD}" | sudo chpasswd
           echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/${USERNAME}
-          sudo apt-get update -qq
-          sudo apt-get -y -qq upgrade
-          sudo apt-get install -y -qq ufw curl dbus-x11 xorg xrdp
 
-          # Lock down firewall (allow only tailscale)
-          sudo ufw default deny incoming
-          sudo ufw default allow outgoing
-          sudo ufw allow in on tailscale0
-          sudo ufw enable || true
-
-      - name: Install Desktop Environment
+      - name: Install KDE Plasma + xrdp
         run: |
-          echo ">>> Installing desktop: $DESKTOP"
-          case "$DESKTOP" in
-            kde)
-              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq kde-plasma-desktop
-              echo "startplasma-x11" | sudo tee /home/${USERNAME}/.xsession
-              ;;
-            xfce)
-              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xfce4
-              echo "startxfce4" | sudo tee /home/${USERNAME}/.xsession
-              ;;
-            gnome)
-              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ubuntu-desktop
-              echo "gnome-session" | sudo tee /home/${USERNAME}/.xsession
-              ;;
-          esac
-          sudo chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.xsession
+          echo ">>> Installing KDE Plasma Desktop..."
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq kde-plasma-desktop xorg dbus-x11 xrdp
+
+          # إعداد جلسة KDE Plasma للمستخدم runner
+          echo "startplasma-x11" | sudo tee /home/${USERNAME}/.xsession
+          echo "exec startplasma-x11" | sudo tee /home/${USERNAME}/.xinitrc
+          sudo chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.xsession /home/${USERNAME}/.xinitrc
+
           sudo systemctl enable --now xrdp
           sudo systemctl restart xrdp
 
-      - name: Install and start Tailscale
+      - name: Install Tailscale
         run: |
           echo ">>> Installing Tailscale..."
-          curl -fsSL https://tailscale.com/install.sh | sudo sh
-          # Use ephemeral key so the node disappears automatically
-          sudo tailscale up --authkey "${TAILSCALE_AUTHKEY}" \
-                            --hostname "${TAILSCALE_HOSTNAME}" \
-                            --ephemeral
-          sudo tailscale status
+          curl -fsSL https://tailscale.com/install.sh | sudo sh >/dev/null 2>&1
+          sudo tailscale up --authkey "${TAILSCALE_AUTHKEY}" --hostname "${TAILSCALE_HOSTNAME}"
           sudo tailscale ip -4
 
       - name: Connection + Keep Alive
@@ -77,10 +49,9 @@ jobs:
           echo "=== FINAL CONNECTION INFO ==="
           echo "USERNAME: ${USERNAME}"
           echo "PASSWORD: ${PASSWORD}"
-          echo "Desktop: ${DESKTOP}"
           echo "Tailscale IPs:"
           sudo tailscale ip -4 || true
+          echo "Connect with any RDP client using the IP above."
           echo
-          echo ">>> Connect via RDP to the above IP using the credentials."
-          echo ">>> Workflow will keep the runner alive for up to 6 hours."
+          echo ">>> Keeping runner alive. Connect now via RDP."
           while true; do sleep 600; done
